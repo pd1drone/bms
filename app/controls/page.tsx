@@ -1,4 +1,3 @@
-// pages/Controls.js
 "use client";
 import "primereact/resources/themes/lara-light-cyan/theme.css";
 import { useEffect, useState } from 'react';
@@ -16,10 +15,11 @@ interface Room {
 
 const Controls = () => {
   const [rooms, setRooms] = useState<Room[]>([]); // Explicitly define the type of rooms state
+  const [allOn, setAllOn] = useState(false); // State for the top-level toggle switch
 
   useEffect(() => {
     fetchRooms(); // Initial fetch when component mounts
-    const intervalId = setInterval(fetchRooms, 100); // Fetch data every 500 milliseconds
+    const intervalId = setInterval(fetchRooms, 500); // Fetch data every 500 milliseconds
 
     // Clear the interval on component unmount
     return () => clearInterval(intervalId);
@@ -27,7 +27,6 @@ const Controls = () => {
 
   const fetchRooms = async () => {
     try {
-
       const device = localStorage.getItem('device');
       if (!device) {
         window.location.href = '/';
@@ -48,6 +47,10 @@ const Controls = () => {
         return roomA - roomB;
       });
       setRooms(roomsData);
+      
+      // Check if all rooms are on or off to set the toggle switch state
+      const allAreOn = roomsData.every(room => room.state === 1);
+      setAllOn(allAreOn);
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -70,20 +73,46 @@ const Controls = () => {
     }
   };
 
+  const handleAllToggle = async (value: boolean) => {
+    try {
+      const device = localStorage.getItem('device');
+      if (!device) {
+        throw new Error('Device IP address not found in localStorage');
+      }
+      const endpoint = value ? 'allon' : 'alloff';
+      const response = await axios.get(`http://${device}:8081/${endpoint}`);
+      if (response.data) {
+        fetchRooms(); 
+      } else {
+        throw new Error('Failed to update all lights');
+      }
+      setAllOn(value);
+    } catch (error) {
+      console.error('Error toggling all lights:', error);
+    }
+  };
+
   return (
     <div>
-    <div className="px-8 py-4 flex justify-between items-center">
-      <h1 className="text-4xl font-black pt-4 text-white-900 tracking-[-0.5px] pb-2">
-        Controls
-      </h1>
-      <div>
-        <Link legacyBehavior href="/dashboard">
-          <a className="flex items-center text-white text-lg hover:underline">
-            <span className="mr-2">&larr;</span> Back
-          </a>
-        </Link>
+      <div className="px-8 py-4 flex justify-between items-center">
+        <h1 className="text-4xl font-black pt-4 text-white-900 tracking-[-0.5px] pb-2">
+          Controls
+        </h1>
+        <div className="flex items-center">
+          <span className="mr-3 text-lg text-white">All Lights</span>
+          <InputSwitch
+            checked={allOn}
+            onChange={(e) => handleAllToggle(e.value)}
+          />
+        </div>
+        <div>
+          <Link legacyBehavior href="/dashboard">
+            <a className="flex items-center text-white text-lg hover:underline">
+              <span className="mr-2">&larr;</span> Back
+            </a>
+          </Link>
+        </div>
       </div>
-    </div>
       <div>
         <DataTable value={rooms} size="small" stripedRows tableStyle={{ minWidth: '50rem' }}>
           <Column field="room" header="Room" />
@@ -95,8 +124,7 @@ const Controls = () => {
                 const newState = e.value ? 1 : 0;
                 const apiState = e.value ? "on" : "off";
                 let roomNumber = rowData.room.replace('room', ''); // Remove 'room' from room number
-                handleToggle(roomNumber, newState,apiState.toLowerCase());
-                //fetchRooms();
+                handleToggle(roomNumber, newState, apiState.toLowerCase());
               }}
             />
           )} />
