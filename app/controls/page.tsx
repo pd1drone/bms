@@ -4,13 +4,14 @@ import { useEffect, useState } from 'react';
 import { DataTable } from 'primereact/datatable';
 import { Column } from 'primereact/column';
 import { InputSwitch } from 'primereact/inputswitch'; // Import InputSwitch
-import axios from 'axios';
 import Link from 'next/link';
+import { ref, onValue, set } from 'firebase/database';
+import { database } from '../firebase'; // Import your Firebase database
 
 // Define the type of each room object
 interface Room {
   room: string;
-  state: number;
+  state: boolean;
 }
 
 const Controls = () => {
@@ -27,47 +28,43 @@ const Controls = () => {
 
   const fetchRooms = async () => {
     try {
-      const device = localStorage.getItem('device');
-      if (!device) {
+      const user = localStorage.getItem('user');
+      if (!user) {
         window.location.href = '/';
-        throw new Error('Device IP address not found in localStorage');
       }
-      const response = await axios.get(`http://${device}:8081/status`);
-      if (!response.data) {
-        throw new Error('Failed to fetch data');
-      }
-      const data = response.data;
-      console.log(data);
-      // Convert data object to array of Room objects
-      const roomsData: Room[] = Object.entries(data).map(([room, state]) => ({ room, state: state as number }));
-      // Sort roomsData based on the numeric part of the room field
-      roomsData.sort((a, b) => {
-        const roomA = parseInt(a.room.replace('room', ''));
-        const roomB = parseInt(b.room.replace('room', ''));
-        return roomA - roomB;
+      const roomsRef = ref(database, '/'); // Reference to the root of your Firebase database
+      onValue(roomsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (!data) {
+          throw new Error('Failed to fetch data');
+        }
+        console.log(data);
+        // Convert data object to array of Room objects, excluding 'loggedInUsers'
+        const roomsData: Room[] = Object.entries(data)
+          .filter(([key]) => key.startsWith('Room')) // Filter out only room entries
+          .map(([room, state]) => ({ room, state: state as boolean }));
+        // Sort roomsData based on the numeric part of the room field
+        roomsData.sort((a, b) => {
+          const roomA = parseInt(a.room.replace('Room', ''));
+          const roomB = parseInt(b.room.replace('Room', ''));
+          return roomA - roomB;
+        });
+        setRooms(roomsData);
+        
+        // Check if all rooms are on or off to set the toggle switch state
+        const allAreOn = roomsData.every(room => room.state === true);
+        setAllOn(allAreOn);
       });
-      setRooms(roomsData);
-      
-      // Check if all rooms are on or off to set the toggle switch state
-      const allAreOn = roomsData.every(room => room.state === 1);
-      setAllOn(allAreOn);
     } catch (error) {
       console.error('Error fetching data:', error);
     }
   };
 
-  const handleToggle = async (room: string, newState: number, apiState: string) => {
+  const handleToggle = async (room: string, newState: boolean) => {
     try {
-      const device = localStorage.getItem('device');
-      if (!device) {
-        throw new Error('Device IP address not found in localStorage');
-      }
-      const response = await axios.get(`http://${device}:8081/${room}${apiState}`);
-      if (response.data) {
-        fetchRooms(); 
-      } else {
-        throw new Error('Failed to update state');
-      }
+      const roomRef = ref(database, `/${room}`); // Reference to the specific room in Firebase
+      await set(roomRef, newState); // Directly set the state
+      fetchRooms(); // Refresh the data after update
     } catch (error) {
       console.error('Error updating state:', error);
     }
@@ -75,18 +72,13 @@ const Controls = () => {
 
   const handleAllToggle = async (value: boolean) => {
     try {
-      const device = localStorage.getItem('device');
-      if (!device) {
-        throw new Error('Device IP address not found in localStorage');
-      }
-      const endpoint = value ? 'allon' : 'alloff';
-      const response = await axios.get(`http://${device}:8081/${endpoint}`);
-      if (response.data) {
-        fetchRooms(); 
-      } else {
-        throw new Error('Failed to update all lights');
-      }
-      setAllOn(value);
+      const updates: Record<string, boolean> = rooms.reduce((acc, { room }) => {
+        acc[room] = value; // Update each room state to the new value
+        return acc;
+      }, {} as Record<string, boolean>);
+
+      await set(ref(database, '/'), updates); // Update all rooms at once
+      setAllOn(value); // Set the top-level toggle state
     } catch (error) {
       console.error('Error toggling all lights:', error);
     }
@@ -118,23 +110,20 @@ const Controls = () => {
           <Column field="room" header="Room" />
           <Column header="State" body={(rowData) => (
             <InputSwitch
-              checked={rowData.state === 1}
+              checked={rowData.state}
               onChange={(e) => {
-                console.log(e.value)
-                const newState = e.value ? 1 : 0;
-                const apiState = e.value ? "on" : "off";
-                let roomNumber = rowData.room.replace('room', ''); // Remove 'room' from room number
-                handleToggle(roomNumber, newState, apiState.toLowerCase());
+                const newState = e.value;
+                handleToggle(rowData.room, newState);
               }}
             />
           )} />
           <Column header="Status" body={(rowData) => (
             <img
-              src={rowData.state === 1 ? '/images/light_on.png' : '/images/light_off.png'}
-              alt={rowData.state === 1 ? 'Light On' : 'Light Off'}
+              src={rowData.state ? '/images/light_on.png' : '/images/light_off.png'}
+              alt={rowData.state ? 'Light On' : 'Light Off'}
               style={{
-                width: rowData.state === 1 ? '36px' : '32px',
-                height: rowData.state === 1 ? '36px' : '32px'
+                width: rowData.state ? '36px' : '32px',
+                height: rowData.state ? '36px' : '32px'
               }}
             />
           )} />
